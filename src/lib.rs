@@ -108,7 +108,8 @@ pub const VERSION: Version = Version {
     rev: env!("GIT_REVISION"),
 };
 
-mod convert;
+#[doc(hidden)]
+pub mod convert;
 mod crc;
 pub mod ed25519;
 mod error;
