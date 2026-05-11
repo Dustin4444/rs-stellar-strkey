@@ -6,6 +6,8 @@ pub mod zero;
 use clap::{Parser, Subcommand};
 use std::{ffi::OsString, fmt::Debug};
 
+use crate::Strkey;
+
 #[derive(Parser, Debug, Clone)]
 #[command(
     author,
@@ -20,6 +22,9 @@ use std::{ffi::OsString, fmt::Debug};
 pub struct Root {
     #[command(subcommand)]
     cmd: Cmd,
+    /// Suppress stderr log and warning output
+    #[arg(long, short = 'q', global = true)]
+    quiet: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -40,6 +45,13 @@ enum Cmd {
     Version,
 }
 
+/// Runtime options sourced from global flags on [`Root`] and threaded to each
+/// subcommand's `run`.
+#[derive(Default)]
+pub struct RunOpts {
+    pub quiet: bool,
+}
+
 impl Root {
     /// Run the CLIs root command.
     ///
@@ -47,9 +59,10 @@ impl Root {
     ///
     /// If the root command is configured with state that is invalid.
     pub fn run(&self) -> Result<(), Error> {
+        let opts = RunOpts { quiet: self.quiet };
         match &self.cmd {
-            Cmd::Decode(c) => c.run()?,
-            Cmd::Encode(c) => c.run()?,
+            Cmd::Decode(c) => c.run(&opts)?,
+            Cmd::Encode(c) => c.run(&opts)?,
             Cmd::Zero(c) => c.run(),
             Cmd::Version => version::Cmd::run(),
         }
@@ -79,4 +92,15 @@ where
 {
     let root = Root::try_parse_from(args)?;
     root.run()
+}
+
+/// Emit a stderr warning when a `Strkey` bound for stdout contains secret
+/// material. Centralizes the invariant that every CLI path producing a
+/// `Strkey` for the user must screen it first.
+pub(crate) fn warn_if_private(strkey: &Strkey) {
+    if matches!(strkey, Strkey::PrivateKeyEd25519(_)) {
+        eprintln!(
+            "⚠️  Warning: output contains a private key with secret material. Handle with care."
+        );
+    }
 }

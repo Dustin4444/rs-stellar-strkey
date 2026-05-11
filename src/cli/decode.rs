@@ -38,7 +38,7 @@ pub struct Cmd {
 }
 
 impl Cmd {
-    pub fn run(&self) -> Result<(), Error> {
+    pub fn run(&self, opts: &super::RunOpts) -> Result<(), Error> {
         let buf;
         let input = match &self.strkey {
             Some(s) => s.trim(),
@@ -66,6 +66,9 @@ impl Cmd {
             }
         };
         let strkey = Strkey::from_str(input).map_err(|e| Error::Decode(input.to_string(), e))?;
+        if !opts.quiet {
+            super::warn_if_private(&strkey);
+        }
         let json = serde_json::to_string_pretty(&Decoded(&strkey)).unwrap();
         println!("{json}");
         Ok(())
