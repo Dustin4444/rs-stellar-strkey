@@ -19,12 +19,11 @@ fn test_ed25519_public_key() {
 
 #[test]
 fn test_ed25519_private_key() {
+    let pk = ed25519::PrivateKey([0x00; 32]);
     assert_eq!(
-        serde_json::to_string_pretty(&Decoded(&Strkey::PrivateKeyEd25519(ed25519::PrivateKey([
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ]))))
+        serde_json::to_string_pretty(&serde_json::json!({
+            "private_key_ed25519": Decoded(Unredacted(&pk)),
+        }))
         .unwrap(),
         r#"{
   "private_key_ed25519": "0000000000000000000000000000000000000000000000000000000000000000"

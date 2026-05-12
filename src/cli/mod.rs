@@ -6,8 +6,6 @@ pub mod zero;
 use clap::{Parser, Subcommand};
 use std::{ffi::OsString, fmt::Debug};
 
-use crate::Strkey;
-
 #[derive(Parser, Debug, Clone)]
 #[command(
     author,
@@ -92,13 +90,8 @@ where
     root.run()
 }
 
-/// Emit a stderr warning when a `Strkey` bound for stdout contains secret
-/// material. Centralizes the invariant that every CLI path producing a
-/// `Strkey` for the user must screen it first.
-pub(crate) fn warn_if_private(strkey: &Strkey) {
-    if matches!(strkey, Strkey::PrivateKeyEd25519(_)) {
-        eprintln!(
-            "⚠️  Warning: output contains a private key with secret material. Handle with care."
-        );
-    }
+/// Emit a stderr warning that the output bound for stdout contains secret
+/// material. Called from CLI paths that handle private-key strkeys.
+pub(crate) fn warn_private_key() {
+    eprintln!("⚠️  Warning: output contains a private key with secret material. Handle with care.");
 }

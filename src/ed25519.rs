@@ -1,6 +1,7 @@
 use crate::{
     convert::{binary_len, decode, decode_zeroizing, encode, encode_len, encode_zeroizing},
     error::DecodeError,
+    unredacted::Unredacted,
     version,
 };
 
@@ -19,30 +20,21 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 /// are overwritten with zeroes when a value is dropped.
 /// [`from_string`](Self::from_string) and [`from_slice`](Self::from_slice)
 /// zero their intermediate scratch buffers when they return.
-/// [`write_string`](Self::write_string) is the encoding path that wraps its
-/// scratch buffers in [`Zeroizing`] and writes directly into a
-/// caller-provided buffer, avoiding any return-value move.
+/// [`Unredacted::write_string`] is the encoding path that wraps its scratch
+/// buffers in [`Zeroizing`] and writes directly into a caller-provided
+/// buffer, avoiding any return-value move.
 ///
-/// Other functions and trait implementations listed below do not zero the
-/// private key value:
-/// - [`Debug`]
-/// - [`Display`]
-/// - [`to_string`](Self::to_string)
-/// - `Serialize`/`Deserialize` under the `serde` and `serde-decoded` features
+/// [`Debug`] emits `PrivateKey([REDACTED])`. To render the encoded strkey
+/// form, serialize via `serde`, or emit the raw seed bytes in any form,
+/// wrap the value in [`Unredacted`] — see [`Unredacted`]'s doc for the full
+/// list of paths that opt-in unlocks.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Zeroize, ZeroizeOnDrop)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde_with::SerializeDisplay, serde_with::DeserializeFromStr)
-)]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 pub struct PrivateKey(pub [u8; 32]);
 
 impl Debug for PrivateKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "PrivateKey(")?;
-        for b in &self.0 {
-            write!(f, "{b:02x}")?;
-        }
-        write!(f, ")")
+        f.write_str("PrivateKey([REDACTED])")
     }
 }
 
@@ -54,7 +46,9 @@ impl PrivateKey {
         assert!(Self::BINARY_LEN == 35);
         assert!(Self::ENCODED_LEN == 56);
     };
+}
 
+impl Unredacted<&PrivateKey> {
     /// Encodes this private key to its strkey string form.
     ///
     /// # Zeroize
@@ -63,10 +57,11 @@ impl PrivateKey {
     /// drop, but the returned `String` itself is plain — its bytes are not
     /// zeroed when the value is dropped. Use
     /// [`write_string`](Self::write_string) for zeroizing.
-    pub fn to_string(&self) -> String<{ Self::ENCODED_LEN }> {
-        let mut zeroizing: Zeroizing<String<{ Self::ENCODED_LEN }>> = Zeroizing::new(String::new());
+    pub fn to_string(&self) -> String<{ PrivateKey::ENCODED_LEN }> {
+        let mut zeroizing: Zeroizing<String<{ PrivateKey::ENCODED_LEN }>> =
+            Zeroizing::new(String::new());
         self.write_string(&mut zeroizing);
-        let mut out: String<{ Self::ENCODED_LEN }> = String::new();
+        let mut out: String<{ PrivateKey::ENCODED_LEN }> = String::new();
         out.push_str(&zeroizing).unwrap();
         out
     }
@@ -80,14 +75,16 @@ impl PrivateKey {
     /// [`Zeroizing`] and zeroed on drop, and the encoded bytes are written
     /// directly into `out` rather than returned by value, so no copy is left
     /// on this method's stack frame.
-    pub fn write_string(&self, out: &mut Zeroizing<String<{ Self::ENCODED_LEN }>>) {
-        encode_zeroizing::<{ Self::PAYLOAD_LEN }, { Self::BINARY_LEN }, { Self::ENCODED_LEN }>(
-            version::PRIVATE_KEY_ED25519,
-            &self.0,
-            out,
-        );
+    pub fn write_string(&self, out: &mut Zeroizing<String<{ PrivateKey::ENCODED_LEN }>>) {
+        encode_zeroizing::<
+            { PrivateKey::PAYLOAD_LEN },
+            { PrivateKey::BINARY_LEN },
+            { PrivateKey::ENCODED_LEN },
+        >(version::PRIVATE_KEY_ED25519, &self.0 .0, out);
     }
+}
 
+impl PrivateKey {
     pub fn from_payload(payload: &[u8]) -> Result<Self, DecodeError> {
         match payload.try_into() {
             Ok(ed25519) => Ok(Self(ed25519)),
@@ -107,13 +104,42 @@ impl PrivateKey {
             _ => Err(DecodeError::Invalid),
         }
     }
+
+    /// Borrows this private key as an [`Unredacted`] wrapper so it can be
+    /// rendered via [`Display`] or [`to_string`](Unredacted::to_string), or
+    /// serialized in its strkey string form.
+    pub fn as_unredacted(&self) -> Unredacted<&Self> {
+        Unredacted(self)
+    }
 }
 
-impl Display for PrivateKey {
+impl Display for Unredacted<&PrivateKey> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut buf: Zeroizing<String<{ Self::ENCODED_LEN }>> = Zeroizing::new(String::new());
+        let mut buf: Zeroizing<String<{ PrivateKey::ENCODED_LEN }>> = Zeroizing::new(String::new());
         self.write_string(&mut buf);
         f.write_str(&buf)
+    }
+}
+
+impl Debug for Unredacted<&PrivateKey> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "PrivateKey(")?;
+        for b in &self.0 .0 {
+            write!(f, "{b:02x}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+impl Display for Unredacted<PrivateKey> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&Unredacted(&self.0), f)
+    }
+}
+
+impl Debug for Unredacted<PrivateKey> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(&Unredacted(&self.0), f)
     }
 }
 
@@ -128,7 +154,7 @@ impl FromStr for PrivateKey {
 #[cfg(feature = "serde-decoded")]
 mod private_key_decoded_serde_impl {
     use super::*;
-    use crate::decoded_json_format::Decoded;
+    use crate::{decoded_json_format::Decoded, unredacted::Unredacted};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::serde_as;
 
@@ -142,17 +168,17 @@ mod private_key_decoded_serde_impl {
     #[serde(transparent)]
     struct DecodedOwned(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
 
-    impl Serialize for Decoded<&PrivateKey> {
+    impl Serialize for Decoded<Unredacted<&PrivateKey>> {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            let Self(PrivateKey(bytes)) = self;
+            let Self(Unredacted(PrivateKey(bytes))) = self;
             DecodedBorrowed(bytes).serialize(serializer)
         }
     }
 
-    impl<'de> Deserialize<'de> for Decoded<PrivateKey> {
+    impl<'de> Deserialize<'de> for Decoded<Unredacted<PrivateKey>> {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let DecodedOwned(bytes) = DecodedOwned::deserialize(deserializer)?;
-            Ok(Decoded(PrivateKey(bytes)))
+            Ok(Decoded(Unredacted(PrivateKey(bytes))))
         }
     }
 }
@@ -626,11 +652,11 @@ mod tests {
             0x18, 0x55, 0xf3, 0x63,
         ]);
         let mut buf: Zeroizing<String<{ PrivateKey::ENCODED_LEN }>> = Zeroizing::new(String::new());
-        key.write_string(&mut buf);
+        key.as_unredacted().write_string(&mut buf);
         assert_eq!(
             buf.as_str(),
             "SBU2RRGLXH3E5CQHTD3ODLDF2BWDCYUSSBLLZ5GNW7JXHDIYKXZWHOKR"
         );
-        assert_eq!(buf.as_str(), key.to_string().as_str());
+        assert_eq!(buf.as_str(), key.as_unredacted().to_string().as_str());
     }
 }

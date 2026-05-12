@@ -1,7 +1,7 @@
 use std::io::{IsTerminal, Read};
 use std::str::FromStr;
 
-use crate::{DecodeError, Decoded, Strkey};
+use crate::{ed25519, DecodeError, Decoded, Strkey, Unredacted};
 use clap::Args;
 
 #[derive(Debug)]
@@ -55,11 +55,21 @@ impl Cmd {
             });
         }
         let input = buf.trim();
-        let strkey = Strkey::from_str(input).map_err(|e| Error::Decode(input.to_string(), e))?;
-        if !opts.quiet {
-            super::warn_if_private(&strkey);
-        }
-        let json = serde_json::to_string_pretty(&Decoded(&strkey)).unwrap();
+        // `S…` strkeys are decoded via `ed25519::PrivateKey` directly; the
+        // Strkey enum intentionally excludes that variant.
+        let json = if let Ok(k) = Strkey::from_str(input) {
+            serde_json::to_string_pretty(&Decoded(&k)).unwrap()
+        } else {
+            let pk = ed25519::PrivateKey::from_str(input)
+                .map_err(|e| Error::Decode(input.to_string(), e))?;
+            if !opts.quiet {
+                super::warn_private_key();
+            }
+            serde_json::to_string_pretty(&serde_json::json!({
+                "private_key_ed25519": Decoded(Unredacted(&pk)),
+            }))
+            .unwrap()
+        };
         println!("{json}");
         Ok(())
     }
